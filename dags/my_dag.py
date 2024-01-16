@@ -2,13 +2,14 @@ import os
 import logging
 from datetime import datetime
 import pandas as pd
+from sqlalchemy import create_engine
 import pyarrow.parquet as pq
-from airflow import DAG
-from airflow.decorators import task
 
 from google.cloud import storage
-from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateExternalTableOperator
 
+from airflow import DAG
+from airflow.decorators import task
+from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateExternalTableOperator
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 
@@ -20,15 +21,15 @@ BUCKET = os.environ.get("GCP_GCS_BUCKET")
 
 execution_date = datetime.now().strftime('%Y-%m')
 FILE_URL = 'https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_{{ execution_date.strftime(\'%Y-%m\') }}.parquet'
-PARQUET_FILENAME = f'{execution_date}.parquet'
-CSV_FILENAME = f'{execution_date}.csv'
+PARQUET_FILENAME = '/opt/airflow/' + execution_date + '.parquet'
+CSV_FILENAME = '/opt/airflow/' + execution_date + '.csv'
 
 with DAG(
-	dag_id="elliots_first_dag10",
+	dag_id="elliots_first_dag",
 	schedule_interval="@monthly",
 	# schedule_interval=None,
-	start_date=datetime(2022,2,1),
-	end_date=datetime(2022,3,1),
+	start_date=datetime(2023,2,1),
+	end_date=datetime(2023,2,1),
 	catchup=True
 ) as dag:
 	
@@ -37,16 +38,34 @@ with DAG(
 		bash_command = f'curl -sSL {FILE_URL} > {PARQUET_FILENAME}'
 	)
 
+	# @task
+	# def convert_to_csv():
+	# 	logging.info('*****************')
+	# 	logging.info('parquet_filename is:' + PARQUET_FILENAME)
+	# 	logging.info('execution_date is:' + execution_date)
+	# 	logging.info('*****************')
+	# 	dataset = pq.ParquetDataset(PARQUET_FILENAME)
+	# 	table = dataset.read()
+	# 	df = table.to_pandas()
+	# 	df.to_csv(CSV_FILENAME, index=False)
+
 	@task
-	def convert_to_csv():
-		# logging.info('airflow_home is:' + AIRFLOW_HOME)
+	def parquet_to_postgres():
+		engine = create_engine('postgresql://airflow:airflow@postgres/airflow')
+		engine.connect()
+		parquet_file = pq.ParquetFile(PARQUET_FILENAME)
+		logging.info('*****************')
 		logging.info('parquet_filename is:' + PARQUET_FILENAME)
-		logging.info('execution_date is:' + execution_date)
-		dataset = pq.ParquetDataset(PARQUET_FILENAME)
-		table = dataset.read()
-		df = table.to_pandas()
-		df.to_csv(CSV_FILENAME, index=False)
+		for i, batch in enumerate(parquet_file.iter_batches(batch_size=5)):
+			logging.info(f'***iteration {i}***')
+			chunk = batch.to_pandas()
+			logging.info(chunk.to_string())
+			chunk.tpep_pickup_datetime = pd.to_datetime(chunk.tpep_pickup_datetime)
+			chunk.tpep_dropoff_datetime = pd.to_datetime(chunk.tpep_dropoff_datetime)
+			if i==0:	
+				chunk.head(n=0).to_sql(name='taxi_data', con=engine, if_exists='replace')
+			chunk.to_sql('taxi_data', engine, if_exists='append', index=False)
 	
-	download_parquet >> convert_to_csv()
+	download_parquet >> parquet_to_postgres()
 
 
