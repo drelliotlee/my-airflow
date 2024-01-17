@@ -5,7 +5,7 @@ x-airflow-common:
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-    AIRFLOW_CONN_MY_PROD_DATABASE: 'postgres://airflow:airflow@postgres:5432/airflow'
+    AIRFLOW_CONN_DEFAULT_CONNECTION: 'postgresql://airflow:airflow@postgres:5432'
     AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0

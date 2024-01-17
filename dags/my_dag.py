@@ -9,9 +9,14 @@ from google.cloud import storage
 
 from airflow import DAG
 from airflow.decorators import task
-from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateExternalTableOperator
+from airflow.hooks.base import BaseHook
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
+from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateExternalTableOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.providers.postgres.operators.postgres import PostgresOperator
+
+
 
 # AIRFLOW_HOME = os.environ.get("AIRFLOW_HOME", "/opt/airflow/")
 # AIRFLOW_HOME = "/opt/airflow/"
@@ -32,27 +37,17 @@ with DAG(
 	end_date=datetime(2023,2,1),
 	catchup=True
 ) as dag:
+
 	
 	download_parquet = BashOperator(
 		task_id = "download_parquet",
 		bash_command = f'curl -sSL {FILE_URL} > {PARQUET_FILENAME}'
 	)
 
-	# @task
-	# def convert_to_csv():
-	# 	logging.info('*****************')
-	# 	logging.info('parquet_filename is:' + PARQUET_FILENAME)
-	# 	logging.info('execution_date is:' + execution_date)
-	# 	logging.info('*****************')
-	# 	dataset = pq.ParquetDataset(PARQUET_FILENAME)
-	# 	table = dataset.read()
-	# 	df = table.to_pandas()
-	# 	df.to_csv(CSV_FILENAME, index=False)
-
 	@task
 	def parquet_to_postgres():
 		engine = create_engine('postgresql://airflow:airflow@postgres/airflow')
-		engine.connect()
+		connection = engine.connect()
 		parquet_file = pq.ParquetFile(PARQUET_FILENAME)
 		logging.info('*****************')
 		logging.info('parquet_filename is:' + PARQUET_FILENAME)
@@ -65,7 +60,43 @@ with DAG(
 			if i==0:	
 				chunk.head(n=0).to_sql(name='taxi_data', con=engine, if_exists='replace')
 			chunk.to_sql('taxi_data', engine, if_exists='append', index=False)
+		connection.close()
+
+	download_csv = BashOperator(
+		task_id = "download_csv",
+		bash_command = f'curl -sSL {CSV_FILENAME}'
+	)
+
+	create_zones_table = PostgresOperator(
+		task_id = 'create_zones_table',
+		postgres_conn_id = "my_connection",
+		sql = """
+			DROP TABLE IF EXISTS zones_table;
+			CREATE TABLE zones_table(
+				LocationID INT,
+				Borough VARCHAR(80),
+				Zone VARCHAR(80),
+				Service_zone VARCHAR(80)
+			);
+		"""
+	)
+
+	@task
+	def csv_to_postgres():
+		hook = PostgresHook(postgres_conn_id='my_connection')
+		conn = hook.get_conn()
+		cur = conn.cursor()
+		sql_query = """
+		COPY zones_table
+		FROM STDIN WITH CSV HEADER DELIMITER AS ',' QUOTE '\"'"
+		"""
+		with open(CSV_FILENAME, "r") as f:
+			cur.copy_expert(sql_query, f)
+		conn.commit()
+		cur.close()
+		conn.close()
+
 	
-	download_parquet >> parquet_to_postgres()
+	download_csv >> create_zones_table >> csv_to_postgres() >> download_parquet >> parquet_to_postgres()
 
 
