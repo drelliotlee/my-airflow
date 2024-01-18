@@ -27,7 +27,7 @@ PARQUET_FILENAME = '/opt/airflow/' + execution_date + '.parquet'
 CSV_FILENAME = '/opt/airflow/' + execution_date + '.csv'
 
 with DAG(
-	dag_id="elliots_dag5",
+	dag_id="elliots_dag",
 	schedule_interval="@monthly",
 	# schedule_interval=None,
 	start_date=datetime(2023,4,1),
@@ -160,10 +160,33 @@ with DAG(
 		"""
 	)
 
+	@task
+	def export_to_parquet():
+		engine = create_engine('postgresql://airflow:airflow@postgres/taxi_db')
+		connection = engine.connect()
+		df = pd.read_sql_query("SELECT * FROM joined_table", engine)
+		pq.write_table(df, 'joined_table.parquet')
+		connection.close()
+
+	bigquery_external_table_task = BigQueryCreateExternalTableOperator(
+        task_id="bigquery_external_table_task",
+        table_resource={
+            "tableReference": {
+                "projectId": PROJECT_ID,
+                "datasetId": 'taxi_data',
+                "tableId": "wine_quality",
+            },
+            "externalDataConfiguration": {
+                "sourceFormat": "PARQUET",
+                "sourceUris": [f"gs://{BUCKET}/raw/joined_table.parquet"],
+            },
+        },
+    )
+
 	
 	drop_2nd_database >> create_2nd_database >> [ download_csv, download_parquet ]
 	download_csv >> create_zones_table >> csv_to_postgres() >> join_in_postgres
 	download_parquet >> create_trips_table >> parquet_to_postgres() >> join_in_postgres
-	
+	join_in_postgres >> bigquery_external_table_task
 
 
