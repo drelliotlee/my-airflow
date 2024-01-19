@@ -1,7 +1,8 @@
 import os
 import logging
-from datetime import datetime
 import pandas as pd
+from datetime import datetime
+
 from sqlalchemy import create_engine
 import pyarrow.parquet as pq
 
@@ -13,6 +14,7 @@ from airflow.hooks.base import BaseHook
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateExternalTableOperator
+from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateEmptyDatasetOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.postgres.operators.postgres import PostgresOperator
 
@@ -168,13 +170,18 @@ with DAG(
 		pq.write_table(df, 'joined_table.parquet')
 		connection.close()
 
+	create_dataset_task = BigQueryCreateEmptyDatasetOperator(
+        task_id="create_dataset",
+        dataset_id="test_dataset",
+    )
+
 	bigquery_external_table_task = BigQueryCreateExternalTableOperator(
         task_id="bigquery_external_table_task",
         table_resource={
             "tableReference": {
                 "projectId": PROJECT_ID,
                 "datasetId": 'taxi_data',
-                "tableId": "wine_quality",
+                "tableId": "taxi_data",
             },
             "externalDataConfiguration": {
                 "sourceFormat": "PARQUET",
