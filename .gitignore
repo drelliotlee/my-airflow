@@ -4,3 +4,4 @@ plugins/
 dag-examples/
 .venv/
 .vscode/
+__pycache__/
