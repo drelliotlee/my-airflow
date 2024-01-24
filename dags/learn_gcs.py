@@ -69,4 +69,4 @@ with DAG(
         },
     )
 
-	make_parquet() >> create_bucket >> local_to_gcs() >> create_bq_dataset >>create_bq_external_table
+	make_parquet() >> create_bucket >> local_to_gcs() >> create_bq_dataset >> create_bq_external_table

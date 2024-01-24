@@ -9,6 +9,7 @@ USER 0
 
 ENV GCLOUD_HOME=/home/google-cloud-sdk
 ENV PATH="${GCLOUD_HOME}/bin/:${PATH}"
+ENV AIRFLOW_HOME=/opt/airflow/
 
 RUN DOWNLOAD_URL="https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-459.0.0-linux-x86_64.tar.gz"\
     && TMP_DIR="$(mktemp -d)" \
@@ -23,5 +24,10 @@ RUN DOWNLOAD_URL="https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/goo
     && rm -rf "${TMP_DIR}" \
     && gcloud --version
 
-WORKDIR $AIRFLOW_HOME
 
+RUN chown -R airflow: ${AIRFLOW_HOME}
+COPY ./scripts/docker_init.sh ./scripts/docker_init.sh
+RUN ["chmod", "+x", "./scripts/docker_init.sh"]
+# USER airflow
+# CMD [ "./docker_init.sh" ]
+WORKDIR $AIRFLOW_HOME

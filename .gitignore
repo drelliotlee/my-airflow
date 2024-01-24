@@ -2,3 +2,5 @@
 logs/
 plugins/
 dag-examples/
+.venv/
+.vscode/

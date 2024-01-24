@@ -13,16 +13,20 @@ from airflow.decorators import task
 from airflow.hooks.base import BaseHook
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
+from airflow.providers.google.cloud.operators.gcs import GCSCreateBucketOperator
 from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateExternalTableOperator
 from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateEmptyDatasetOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.postgres.operators.postgres import PostgresOperator
+from airflow.providers.http.sensors.http import HttpSensor
+from airflow.providers.http.operators.http import SimpleHttpOperator
 
-
-PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
-BUCKET = os.environ.get("GCP_GCS_BUCKET")
 
 execution_date = datetime.now().strftime('%Y-%m')
+PROJECT_ID = 'learning-gcs-411623'
+BUCKET_NAME = PROJECT_ID + 'test-bucket'
+DATASET_NAME = 'test_dataset'
+TABLE_NAME = 'test-table'
 PARQUET_URL = 'https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_{{ execution_date.strftime(\'%Y-%m\') }}.parquet'
 CSV_URL = 'https://d37ci6vzurychx.cloudfront.net/misc/taxi+_zone_lookup.csv'
 PARQUET_FILENAME = '/opt/airflow/' + execution_date + '.parquet'
@@ -36,6 +40,17 @@ with DAG(
 	end_date=datetime(2023,4,1),
 	catchup=True
 ) as dag:
+	
+	add_connections = BashOperator(
+		task_id = 'add_connections',
+		bash_command = 'airflow users create -e "admin@airflow.com" -f "airflow" -l "airflow" -p "airflow" -r "Admin" -u "airflow"'
+	)
+	
+	is_rest_api_active = HttpSensor(
+		task_id = 'is_rest_api_active',
+		http_conn_id = 'rest_api_conn',
+		endpoint='posts/'
+	)
 	
 	drop_2nd_database = PostgresOperator(
 		task_id = "drop_2nd_database",
@@ -170,22 +185,38 @@ with DAG(
 		pq.write_table(df, 'joined_table.parquet')
 		connection.close()
 
-	create_dataset_task = BigQueryCreateEmptyDatasetOperator(
-        task_id="create_dataset",
-        dataset_id="test_dataset",
-    )
+	create_bucket = GCSCreateBucketOperator(
+		task_id = "create_bucket",
+		bucket_name = BUCKET_NAME,
+		project_id = PROJECT_ID
+	)
 
-	bigquery_external_table_task = BigQueryCreateExternalTableOperator(
+	@task
+	def local_to_gcs():
+		storage.blob._MAX_MULTIPART_SIZE = 5 * 1024 * 1024  # 5 MB
+		storage.blob._DEFAULT_CHUNKSIZE = 5 * 1024 * 1024  # 5 MB
+		client = storage.Client()
+		bucket = client.bucket(BUCKET_NAME)
+		blob = bucket.blob(f"raw/{PARQUET_FILENAME}")
+		blob.upload_from_filename(PARQUET_FILENAME)
+
+	create_bq_dataset = BigQueryCreateEmptyDatasetOperator(
+		task_id = 'create_bq_dataset',
+		dataset_id = DATASET_NAME,
+		project_id = PROJECT_ID
+	) 
+
+	create_bq_external_table = BigQueryCreateExternalTableOperator(
         task_id="bigquery_external_table_task",
         table_resource={
             "tableReference": {
                 "projectId": PROJECT_ID,
-                "datasetId": 'taxi_data',
-                "tableId": "taxi_data",
+                "datasetId": DATASET_NAME,
+                "tableId": TABLE_NAME,
             },
             "externalDataConfiguration": {
                 "sourceFormat": "PARQUET",
-                "sourceUris": [f"gs://{BUCKET}/raw/joined_table.parquet"],
+                "sourceUris": [f"gs://{BUCKET_NAME}/raw/{PARQUET_FILENAME}"],
             },
         },
     )
@@ -194,6 +225,6 @@ with DAG(
 	drop_2nd_database >> create_2nd_database >> [ download_csv, download_parquet ]
 	download_csv >> create_zones_table >> csv_to_postgres() >> join_in_postgres
 	download_parquet >> create_trips_table >> parquet_to_postgres() >> join_in_postgres
-	join_in_postgres >> bigquery_external_table_task
+	download_parquet >> create_bucket >> local_to_gcs() >> create_bq_dataset >> create_bq_external_table
 
 
