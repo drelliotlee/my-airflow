@@ -21,7 +21,6 @@ x-airflow-common:
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
     - ~/.google/credentials/:/.google/credentials:ro
-    - ./scripts:/opt/airflow/scripts
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
@@ -71,7 +70,6 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-    entrypoint: ./scripts/docker_init.sh
 
   airflow-scheduler:
     <<: *airflow-common
@@ -86,7 +84,6 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-    entrypoint: ./scripts/docker_init.sh
 
   airflow-worker:
     <<: *airflow-common
@@ -108,7 +105,6 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-    entrypoint: ./scripts/docker_init.sh
 
   airflow-triggerer:
     <<: *airflow-common
@@ -123,7 +119,6 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-    entrypoint: ./scripts/docker_init.sh
 
   airflow-init:
     <<: *airflow-common
@@ -215,7 +210,6 @@ services:
       - bash
       - -c
       - airflow
-    entrypoint: ./scripts/docker_init.sh
 
   flower:
     <<: *airflow-common
@@ -232,7 +226,6 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-    entrypoint: ./scripts/docker_init.sh
 
 volumes:
   postgres-db-volume:

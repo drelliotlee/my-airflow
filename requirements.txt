@@ -1,4 +1,7 @@
 apache-airflow-providers-google
 apache-airflow-providers-http
 pyarrow
-apache-airflow[google]
+apache-airflow[google]==2.2.3
+pandas
+sqlalchemy
+apache-airflow[celery]==2.2.3

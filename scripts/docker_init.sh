@@ -7,7 +7,7 @@ airflow connections add rest_api_conn --conn-type 'http' --conn-host 'https://go
 
 # airflow connections add --conn-type 'fs' --conn-extra '{"path":"/opt/airflow/dags/files"}' forex_path
 
-# airflow connections add --conn-uri 'https://gist.github.com/' forex_api
+airflow connections add --conn-uri 'https://gist.github.com/' forex_api
 
 # airflow connections add 'spark_conn' --conn-type 'spark' --conn-host 'spark://spark-master' --conn-port 7077
 

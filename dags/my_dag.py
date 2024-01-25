@@ -41,9 +41,14 @@ with DAG(
 	catchup=True
 ) as dag:
 	
-	add_connections = BashOperator(
-		task_id = 'add_connections',
+	add_airflow_users = BashOperator(
+		task_id = 'add_airflow_users',
 		bash_command = 'airflow users create -e "admin@airflow.com" -f "airflow" -l "airflow" -p "airflow" -r "Admin" -u "airflow"'
+	)
+
+	add_airflow_connections = BashOperator(
+		task_id = 'add_airflow_connections',
+		bash_command = "airflow connections add --conn-uri 'https://gist.github.com/' forex_api"
 	)
 	
 	is_rest_api_active = HttpSensor(
