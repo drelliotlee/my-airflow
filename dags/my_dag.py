@@ -2,6 +2,9 @@ import os
 import logging
 import pandas as pd
 from datetime import datetime
+import json
+import urllib.parse
+import subprocess
 
 from sqlalchemy import create_engine
 import pyarrow.parquet as pq
@@ -10,6 +13,7 @@ from google.cloud import storage
 
 from airflow import DAG
 from airflow.decorators import task
+from airflow.decorators import branch_python
 from airflow.hooks.base import BaseHook
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
@@ -32,8 +36,10 @@ CSV_URL = 'https://d37ci6vzurychx.cloudfront.net/misc/taxi+_zone_lookup.csv'
 PARQUET_FILENAME = '/opt/airflow/' + execution_date + '.parquet'
 CSV_FILENAME = '/opt/airflow/' + execution_date + '.csv'
 
+API_URI = 'https://' + urllib.parse.quote('gorest.co.in/public/v2/', safe='')
+
 with DAG(
-	dag_id="elliots_dag",
+	dag_id="elliots_dag4",
 	schedule_interval="@monthly",
 	# schedule_interval=None,
 	start_date=datetime(2023,4,1),
@@ -41,25 +47,51 @@ with DAG(
 	catchup=True
 ) as dag:
 	
-	add_airflow_users = BashOperator(
-		task_id = 'add_airflow_users',
-		bash_command = 'airflow users create -e "admin@airflow.com" -f "airflow" -l "airflow" -p "airflow" -r "Admin" -u "airflow"'
+	entrypoint = BashOperator(
+		task_id = 'entrypoint',
+		bash_command = f'''
+		airflow users create -e "admin@airflow.com" -f "airflow" -l "airflow" -p "airflow" -r "Admin" -u "airflow" && \
+		airflow connections add --conn-uri "postgresql://airflow:airflow@postgres:5432" postgres_conn
+		'''
 	)
 
-	add_airflow_connections = BashOperator(
-		task_id = 'add_airflow_connections',
-		bash_command = "airflow connections add --conn-uri 'https://gist.github.com/' forex_api"
+	@task.branch()
+	def check_if_rest_api_conn_exists():
+		command = "airflow connections list | grep -Eo '^[^|]*\|([^|]*)\|'"
+		terminal_output = subprocess.run(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		if b'rest_api_conn' in terminal_output.stdout:
+			logging.info("*** rest_api_conn already exists ***")
+			return 'rest_api_to_xcom'
+		else:
+			logging.info("*** rest_api_conn doesn't exist ***")
+			return 'create_rest_api_conn'
+
+
+	create_rest_api_conn = BashOperator(
+		task_id = 'create_rest_api_conn',
+		bash_command='''
+			echo "now creating connection" && \
+			airflow connections add --conn-uri {API_URI} rest_api_conn
+			'''
 	)
-	
-	is_rest_api_active = HttpSensor(
-		task_id = 'is_rest_api_active',
+
+	rest_api_to_xcom = SimpleHttpOperator(
+		task_id = "rest_api_to_xcom",
 		http_conn_id = 'rest_api_conn',
-		endpoint='posts/'
+		endpoint = 'posts/',
+		response_filter = lambda response: json.loads(response.text),
+		log_response=True
 	)
-	
+
+	@task
+	def xcom_to_json(ti) -> None:
+		posts = ti.xcom_pull(task_ids=['rest_api_to_xcom'])
+		with open('rest_api_response.json', 'w') as f:
+			json.dump(posts[0], f)
+
 	drop_2nd_database = PostgresOperator(
 		task_id = "drop_2nd_database",
-		postgres_conn_id = "default_connection",
+		postgres_conn_id = "postgres_conn",
 		autocommit = True,
 		sql = '''
 		DROP DATABASE IF EXISTS taxi_db;
@@ -68,7 +100,7 @@ with DAG(
 	
 	create_2nd_database = PostgresOperator(
 		task_id = "create_2nd_database",
-		postgres_conn_id = "default_connection",
+		postgres_conn_id = "postgres_conn",
 		autocommit = True,
 		sql = '''
 		CREATE DATABASE taxi_db;
@@ -82,7 +114,7 @@ with DAG(
 
 	create_trips_table = PostgresOperator(
 		task_id = 'create_trips_table',
-		postgres_conn_id = "default_connection",
+		postgres_conn_id = "postgres_conn",
 		database = 'taxi_db',
 		autocommit = True,
 		sql = """
@@ -137,7 +169,7 @@ with DAG(
 
 	create_zones_table = PostgresOperator(
 		task_id = 'create_zones_table',
-		postgres_conn_id = "default_connection",
+		postgres_conn_id = "postgres_conn",
 		database = 'taxi_db',
 		autocommit = True,
 		sql = """
@@ -154,7 +186,7 @@ with DAG(
 	@task
 	def csv_to_postgres():
 		hook = PostgresHook(
-			postgres_conn_id='default_connection',
+			postgres_conn_id='postgres_conn',
 			schema = 'taxi_db')
 		conn = hook.get_conn()
 		cur = conn.cursor()
@@ -170,7 +202,7 @@ with DAG(
 
 	join_in_postgres = PostgresOperator(
 		task_id = 'join_in_postgres',
-		postgres_conn_id = "default_connection",
+		postgres_conn_id = "postgres_conn",
 		database = 'taxi_db',
 		autocommit = True,
 		sql = """
@@ -226,7 +258,9 @@ with DAG(
         },
     )
 
-	
+	check_if_rest_api_conn_exists_instance = check_if_rest_api_conn_exists()
+	check_if_rest_api_conn_exists_instance >> rest_api_to_xcom
+	check_if_rest_api_conn_exists_instance >> create_rest_api_conn
 	drop_2nd_database >> create_2nd_database >> [ download_csv, download_parquet ]
 	download_csv >> create_zones_table >> csv_to_postgres() >> join_in_postgres
 	download_parquet >> create_trips_table >> parquet_to_postgres() >> join_in_postgres
