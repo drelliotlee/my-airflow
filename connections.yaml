@@ -1,0 +1,18 @@
+postgres_conn:
+  conn_type: postgres
+  description: ''
+  extra: ''
+  host: postgres
+  login: airflow
+  password: airflow
+  port: 5432
+  schema: ''
+rest_api_conn:
+  conn_type: http
+  description: ''
+  extra: ''
+  host: https://gorest.co.in/public/v2
+  login: ''
+  password: null
+  port: null
+  schema: ''

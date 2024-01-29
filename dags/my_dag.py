@@ -36,10 +36,10 @@ CSV_URL = 'https://d37ci6vzurychx.cloudfront.net/misc/taxi+_zone_lookup.csv'
 PARQUET_FILENAME = '/opt/airflow/' + execution_date + '.parquet'
 CSV_FILENAME = '/opt/airflow/' + execution_date + '.csv'
 
-API_URI = 'https://' + urllib.parse.quote('gorest.co.in/public/v2/', safe='')
+# API_URI = 'https://' + urllib.parse.quote('gorest.co.in/public/v2/', safe='')
 
 with DAG(
-	dag_id="elliots_dag4",
+	dag_id="elliots_dag",
 	schedule_interval="@monthly",
 	# schedule_interval=None,
 	start_date=datetime(2023,4,1),
@@ -51,34 +51,35 @@ with DAG(
 		task_id = 'entrypoint',
 		bash_command = f'''
 		airflow users create -e "admin@airflow.com" -f "airflow" -l "airflow" -p "airflow" -r "Admin" -u "airflow" && \
-		airflow connections add --conn-uri "postgresql://airflow:airflow@postgres:5432" postgres_conn
+		airflow connections import ./connections.yaml --overwrite true
 		'''
 	)
 
-	@task.branch()
-	def check_if_rest_api_conn_exists():
-		command = "airflow connections list | grep -Eo '^[^|]*\|([^|]*)\|'"
-		terminal_output = subprocess.run(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-		if b'rest_api_conn' in terminal_output.stdout:
-			logging.info("*** rest_api_conn already exists ***")
-			return 'rest_api_to_xcom'
-		else:
-			logging.info("*** rest_api_conn doesn't exist ***")
-			return 'create_rest_api_conn'
+	# @task.branch()
+	# def check_if_rest_api_conn_exists():
+	# 	command = "airflow connections list | grep -Eo '^[^|]*\|([^|]*)\|'"
+	# 	terminal_output = subprocess.run(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	# 	if b'rest_api_conn' in terminal_output.stdout:
+	# 		logging.info("*** rest_api_conn already exists ***")
+	# 		return 'rest_api_to_xcom'
+	# 	else:
+	# 		logging.info("*** rest_api_conn doesn't exist ***")
+	# 		return 'create_rest_api_conn'
 
 
-	create_rest_api_conn = BashOperator(
-		task_id = 'create_rest_api_conn',
-		bash_command='''
-			echo "now creating connection" && \
-			airflow connections add --conn-uri {API_URI} rest_api_conn
-			'''
-	)
+	# create_rest_api_conn = BashOperator(
+	# 	task_id = 'create_rest_api_conn',
+	# 	bash_command='''
+	# 		echo "now creating connection" && \
+	# 		airflow connections add --conn-uri {API_URI} rest_api_conn
+	# 		'''
+	# )
 
 	rest_api_to_xcom = SimpleHttpOperator(
 		task_id = "rest_api_to_xcom",
 		http_conn_id = 'rest_api_conn',
 		endpoint = 'posts/',
+		method = 'GET',
 		response_filter = lambda response: json.loads(response.text),
 		log_response=True
 	)
